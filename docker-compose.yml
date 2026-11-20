@@ -1,0 +1,50 @@
+version: "3.8"
+
+services:
+  # Main Real-Time Inference & Distance Service
+  rpi-vision:
+    image: rpi-edge-vision:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rpi_vision_app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    devices:
+      # Pass through hardware camera devices
+      - "/dev/video0:/dev/video0"
+    # Privileged or video group access needed for V4L2 device nodes
+    privileged: true
+    group_add:
+      - video
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+      - ./models:/app/models
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OMP_NUM_THREADS=4
+    command: ["--config", "config/default.yaml"]
+
+  # One-shot Transfer Learning Service for Custom Object Detection
+  train-detector:
+    image: rpi-edge-vision:latest
+    container_name: rpi_train_detector
+    profiles: ["train"]
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    entrypoint: ["python3", "-m", "src.train_detector"]
+    command: ["--data", "data/custom_dataset.yaml", "--epochs", "20", "--batch", "8"]
+
+  # One-shot Transfer Learning Service for Custom Image Classification
+  train-classifier:
+    image: rpi-edge-vision:latest
+    container_name: rpi_train_classifier
+    profiles: ["train"]
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    entrypoint: ["python3", "-m", "src.train_classifier"]
+    command: ["--data", "data/classification_dataset", "--epochs", "15", "--batch", "16"]

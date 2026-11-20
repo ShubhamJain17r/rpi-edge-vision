@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Large binary model weights (downloaded automatically during build via scripts/download_weights.py)
+weights/*.pt
+weights/*.onnx
+!weights/.gitkeep
+
+# Trained custom models
+models/*.pt
+models/*.onnx
+!models/.gitkeep
+
+# Datasets
+data/sample_dataset/images/train/*
+data/sample_dataset/images/val/*
+data/sample_dataset/labels/train/*
+data/sample_dataset/labels/val/*
+!data/sample_dataset/**/.gitkeep
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker / Run artifacts
+runs/
+*.log

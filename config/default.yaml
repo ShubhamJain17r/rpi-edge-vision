@@ -1,0 +1,63 @@
+# Configuration for Edge AI Vision Pipeline on Raspberry Pi 4 & 5
+# Optimized for USB Webcams, V4L2 Hardware Buffers, and High FPS
+
+camera:
+  source: 0                    # Camera index (0 for /dev/video0), or video file path, or RTSP URL
+  width: 640
+  height: 480
+  fps: 30
+  fourcc: "MJPG"               # V4L2 format: MJPG (hardware-decoded on USB webcams) or YUYV
+  buffer_size: 1               # 1 eliminates webcam capture queue lag
+  fallback_synthetic: true     # If no camera is attached, automatically generate synthetic test frames
+
+detector:
+  model_path: "weights/yolov8n.pt"  # Automatically uses .onnx if present for ARM NEON acceleration
+  conf_threshold: 0.35
+  iou_threshold: 0.45
+  imgsz: 640                   # 640 for standard, 416 for 2x faster RPi-4 inference
+  device: "cpu"
+
+distance:
+  mode: "both"                 # Options: "pinhole" (metric via known objects), "midas" (AI depth map), "both"
+  enable_smoothing: true       # Stabilizes webcam readings by removing pixel noise via Exponential Moving Average
+  depth_interval: 3            # OPTIMIZATION: Compute heavy MiDaS depth every Nth frame, while running
+                               # YOLO and optical pinhole distance on 100% of frames. Boosts FPS dramatically!
+
+  pinhole:
+    # Camera focal length in pixels. Calibrate with scripts/calibrate_camera.py
+    # At 640x480 resolution, a standard ~65° FOV webcam has f ≈ 550 - 650 px
+    focal_length: 600.0
+    
+    # Real-world physical dimensions (meters: width, height) of common COCO object classes
+    class_dimensions:
+      person: { width: 0.50, height: 1.70 }
+      car: { width: 1.80, height: 1.50 }
+      bus: { width: 2.50, height: 3.20 }
+      truck: { width: 2.50, height: 3.50 }
+      bicycle: { width: 0.45, height: 1.05 }
+      motorcycle: { width: 0.75, height: 1.10 }
+      bottle: { width: 0.08, height: 0.25 }
+      cup: { width: 0.08, height: 0.10 }
+      chair: { width: 0.50, height: 0.85 }
+      couch: { width: 1.80, height: 0.85 }
+      laptop: { width: 0.35, height: 0.24 }
+      cell phone: { width: 0.08, height: 0.16 }
+      book: { width: 0.15, height: 0.22 }
+      tv: { width: 0.95, height: 0.55 }
+      cat: { width: 0.20, height: 0.25 }
+      dog: { width: 0.30, height: 0.55 }
+      default: { width: 0.30, height: 0.30 }
+
+  midas:
+    model_path: "weights/midas_v21_small.onnx"
+    input_size: [256, 256]
+
+web_streamer:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  quality: 80                  # JPEG compression quality (50-95)
+
+system:
+  num_threads: 4               # 4 cores on both RPi 4 (Cortex-A72) and RPi 5 (Cortex-A76)
+  log_level: "INFO"

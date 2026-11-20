@@ -1,0 +1,9 @@
+# Sample Dataset Configuration for Object Detection Transfer Learning
+path: /app/data/sample_dataset
+train: images/train
+val: images/val
+
+# Class names mapping
+names:
+  0: custom_object
+  1: obstacle
