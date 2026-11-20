@@ -15,14 +15,18 @@ ENV DEBIAN_FRONTEND=noninteractive \
     OPENBLAS_NUM_THREADS=4 \
     MKL_NUM_THREADS=4
 
-# Install hardware video drivers, OpenMP runtime, and essential dependencies
+# Install hardware video drivers, OpenMP runtime, Qt/X11 libraries, and essential dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     v4l-utils \
     libgl1 \
     libglib2.0-0 \
     libgomp1 \
+    libsm6 \
+    libice6 \
+    libxext6 \
     curl \
     ca-certificates \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -50,9 +54,9 @@ RUN python3 scripts/download_weights.py
 # Expose web video feed and telemetry dashboard port
 EXPOSE 8080
 
-# Health check to ensure pipeline or web feed is responsive
+# Health check verifies the pipeline process is actively running
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8080/api/telemetry || exit 1
+    CMD pgrep -f "python3 -m src.pipeline" || exit 1
 
 # Default execution starts the edge vision and distance estimation pipeline
 ENTRYPOINT ["python3", "-m", "src.pipeline"]

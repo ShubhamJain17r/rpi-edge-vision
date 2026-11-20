@@ -2,8 +2,8 @@
 High-FPS Edge AI Vision & Distance Pipeline.
 Optimized for Raspberry Pi 4 & 5 with:
 - Asynchronous threaded inference (camera @ 30 FPS, detection decoupled)
-- Native OpenCV GUI Window (cv2.imshow) for low-overhead local display
-- Optional headless web stream with toggle to save CPU cycles
+- Native OpenCV GUI Window (cv2.imshow) with graceful headless fallback
+- Clean console telemetry when running without GUI and without web server
 - Instantaneous (<0.05ms) optical pinhole metric distance estimation
 """
 
@@ -56,10 +56,8 @@ def annotate_frame(
     for det in detections:
         x1, y1, x2, y2 = det.bbox
 
-        # Bounding box
         cv2.rectangle(annotated, (x1, y1), (x2, y2), box_color, 2)
 
-        # Build label: "person 87% | 1.45m"
         label_parts = [f"{det.class_name} {int(det.confidence * 100)}%"]
         if det.distance_m is not None:
             label_parts.append(f"dist: {det.distance_m:.2f}m")
@@ -67,14 +65,12 @@ def annotate_frame(
             label_parts.append(f"depth: {det.relative_depth}")
         label = " | ".join(label_parts)
 
-        # Label background
         (text_w, text_h), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
         bg_y1 = max(0, y1 - text_h - 8)
         bg_y2 = y1
         cv2.rectangle(annotated, (x1, bg_y1), (x1 + text_w + 10, bg_y2), text_bg_color, -1)
         cv2.rectangle(annotated, (x1, bg_y1), (x1 + text_w + 10, bg_y2), box_color, 1)
 
-        # Text
         cv2.putText(
             annotated,
             label,
@@ -86,16 +82,13 @@ def annotate_frame(
             cv2.LINE_AA
         )
 
-        # Center indicator dot
         cx, cy = det.center
         cv2.circle(annotated, (cx, cy), 3, dist_color, -1)
 
-    # Top status bar with Display FPS and Inference FPS
     status_bar = f"Video: {display_fps:.1f} FPS | AI: {inf_fps:.1f} FPS | Objects: {len(detections)}"
     cv2.rectangle(annotated, (0, 0), (w, 24), (20, 20, 20), -1)
     cv2.putText(annotated, status_bar, (10, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 230, 255), 1, cv2.LINE_AA)
 
-    # Picture-in-picture depth map preview in top-right corner if available
     if depth_preview is not None:
         pip_w = 140
         pip_h = 105
@@ -111,7 +104,7 @@ class AsyncPipeline:
     Decoupled architecture:
     - Camera runs at native 30 FPS.
     - AI Detector runs asynchronously in background worker thread.
-    - Display / Streamer renders latest camera frame at 30 FPS with latest detections.
+    - Display / Streamer renders latest camera frame with latest detections.
     """
 
     def __init__(self, config: Dict[str, Any], show_gui: bool = True, enable_web: bool = True):
@@ -210,26 +203,29 @@ class AsyncPipeline:
                 if depth_vis is not None:
                     self.latest_depth_vis = depth_vis
 
-            # Yield slightly to prevent 100% core starvation
             time.sleep(0.001)
 
     def run_display_loop(self):
-        """Main rendering loop: runs at 30 FPS, rendering to OpenCV GUI window and/or Web Stream."""
+        """Main rendering loop: renders to OpenCV GUI window, Web Stream, or prints Console Telemetry."""
         window_name = self.config.get("display", {}).get("window_name", "RPi Edge Vision & Distance")
         use_gui = self.show_gui and bool(os.environ.get("DISPLAY"))
 
+        # Try initializing OpenCV GUI window safely
         if use_gui:
-            logger.info(f"Opening native OpenCV GUI window: '{window_name}'")
-            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(window_name, 640, 480)
-        else:
-            logger.info("Running in headless display mode (no X11 DISPLAY detected).")
+            try:
+                cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(window_name, 640, 480)
+                logger.info(f"✓ Native OpenCV GUI window active on display: '{window_name}'")
+            except Exception as e:
+                logger.warning(f"Could not open GUI window ({e}). Running in headless mode.")
+                use_gui = False
 
         display_fps = 0.0
         frame_count = 0
         last_fps_time = time.time()
+        last_console_time = time.time()
 
-        logger.info("Pipeline rendering active! Press Ctrl+C or 'q' in OpenCV window to stop.")
+        logger.info("Pipeline rendering active! Press Ctrl+C or 'q' in GUI window to stop.")
 
         try:
             while self.running:
@@ -245,7 +241,7 @@ class AsyncPipeline:
                     frame_count = 0
                     last_fps_time = now
 
-                # Get latest detections
+                # Get latest detections thread-safely
                 with self.lock:
                     dets = list(self.latest_detections)
                     depth_preview = self.latest_depth_vis
@@ -258,13 +254,25 @@ class AsyncPipeline:
                 if self.streamer is not None:
                     self.streamer.update_frame(annotated, display_fps, dets)
 
-                # 2. Render to local OpenCV GUI Window (if enabled)
+                # 2. Render to local OpenCV GUI Window (if active)
                 if use_gui:
-                    cv2.imshow(window_name, annotated)
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord('q') or key == 27:  # 'q' or ESC
-                        logger.info("Exit key pressed in OpenCV window.")
-                        break
+                    try:
+                        cv2.imshow(window_name, annotated)
+                        key = cv2.waitKey(1) & 0xFF
+                        if key == ord('q') or key == 27:  # 'q' or ESC
+                            logger.info("Exit key pressed in OpenCV window.")
+                            break
+                    except Exception as e:
+                        logger.warning(f"cv2.imshow failed: {e}. Switching to console output.")
+                        use_gui = False
+
+                # 3. If running headless without web server (--no-web and no GUI), print console telemetry
+                if not use_gui and self.streamer is None:
+                    if now - last_console_time >= 1.0:
+                        det_strs = [f"{d.class_name}({d.confidence*100:.0f}%, dist={d.distance_m}m)" for d in dets]
+                        det_summary = ", ".join(det_strs) if det_strs else "No objects"
+                        logger.info(f"[TELEMETRY] Video: {display_fps:.1f} FPS | AI: {inf_fps:.1f} FPS | {det_summary}")
+                        last_console_time = now
 
                 # Sleep to match target ~30 FPS
                 time.sleep(0.008)
@@ -274,7 +282,10 @@ class AsyncPipeline:
         finally:
             self.stop()
             if use_gui:
-                cv2.destroyAllWindows()
+                try:
+                    cv2.destroyAllWindows()
+                except Exception:
+                    pass
 
     def stop(self):
         self.running = False

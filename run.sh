@@ -23,11 +23,11 @@ fi
 # 2. X11 Display detection for native OpenCV window (cv2.imshow)
 GUI_FLAG=""
 if [ -n "$DISPLAY" ]; then
-    echo "✓ Found X11 Display ($DISPLAY) -> Enabling high-performance OpenCV GUI window!"
+    echo "✓ Found X11 Display ($DISPLAY)"
     xhost +local:root >/dev/null 2>&1 || true
     GUI_FLAG="-e DISPLAY=${DISPLAY} -v /tmp/.X11-unix:/tmp/.X11-unix:ro"
 else
-    echo "! No X11 DISPLAY detected -> Running in headless mode."
+    echo "! No X11 DISPLAY detected (Running in headless mode)."
 fi
 
 # 3. Clean up existing container
@@ -37,6 +37,15 @@ if [ "$(docker ps -aq -f name=${CONTAINER_NAME})" ]; then
 fi
 
 IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+
+# Check if --no-web is requested
+NO_WEB=false
+for arg in "$@"; do
+    if [ "$arg" == "--no-web" ]; then
+        NO_WEB=true
+        break
+    fi
+done
 
 echo "Starting container ${CONTAINER_NAME}..."
 docker run -d \
@@ -54,8 +63,15 @@ docker run -d \
 
 echo "=========================================================="
 echo " Container launched successfully!"
-echo " OpenCV GUI Window:    $(if [ -n "$DISPLAY" ]; then echo "Active on screen"; else echo "Headless"; fi)"
-echo " Web Stream Dashboard: http://localhost:8080 (or http://${IP_ADDR}:8080)"
-echo " View live logs:       docker logs -f ${CONTAINER_NAME}"
-echo " Stop container:       docker stop ${CONTAINER_NAME}"
-echo "=========================================================="
+if [ "$NO_WEB" = true ]; then
+    echo " Mode:                 Maximum Performance (--no-web)"
+    echo " Web Dashboard:        Disabled (Saves CPU cycles)"
+    echo " Showing live telemetry output below (Press Ctrl+C to detach):"
+    echo "=========================================================="
+    docker logs -f "${CONTAINER_NAME}"
+else
+    echo " Web Stream Dashboard: http://localhost:8080 (or http://${IP_ADDR}:8080)"
+    echo " View live logs:       docker logs -f ${CONTAINER_NAME}"
+    echo " Stop container:       docker stop ${CONTAINER_NAME}"
+    echo "=========================================================="
+fi
