@@ -1,11 +1,13 @@
 """
 Full-Screen Edge AI Vision & Distance Pipeline.
 Optimized for Raspberry Pi 4 & 5 (and local testing on Linux PC) with:
-- Dedicated Full-Screen OpenCV GUI window (cv2.imshow)
+- Dedicated Full-Screen OpenCV GUI window (cv2.imshow) scaled to display resolution
+- Zero white borders: video fills entire screen (or clean black letterbox)
 - Real-time YOLOv8 object detection + optical pinhole metric distance estimation
-- Asynchronous decoupled worker architecture for 30 FPS camera capture and high-speed inference
+- Asynchronous decoupled worker architecture for maximum FPS with zero artificial stalls
 - Clean exit on "ESC" or "q" without container respawn
 - Press "f" to toggle full-screen / windowed mode
+- Press "a" to toggle aspect ratio mode (Fill vs Aspect Fit)
 """
 
 import os
@@ -16,7 +18,7 @@ import logging
 import argparse
 import ctypes
 import threading
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import yaml
 import numpy as np
 import cv2
@@ -41,6 +43,57 @@ def is_qt_gui_supported() -> bool:
         return False
 
 
+def get_screen_resolution() -> Tuple[int, int]:
+    """Queries active X11 display resolution dynamically."""
+    try:
+        x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        d = x11.XOpenDisplay(None)
+        if d:
+            x11.XDefaultScreen.restype = ctypes.c_int
+            x11.XDefaultScreen.argtypes = [ctypes.c_void_p]
+            s = x11.XDefaultScreen(d)
+
+            x11.XDisplayWidth.restype = ctypes.c_int
+            x11.XDisplayWidth.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            w = x11.XDisplayWidth(d, s)
+
+            x11.XDisplayHeight.restype = ctypes.c_int
+            x11.XDisplayHeight.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            h = x11.XDisplayHeight(d, s)
+
+            x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+            x11.XCloseDisplay(d)
+            if w > 0 and h > 0:
+                return w, h
+    except Exception as e:
+        logger.debug(f"Could not query X11 display size: {e}")
+    return 1920, 1080
+
+
+def scale_frame_to_screen(img: np.ndarray, target_w: int, target_h: int, keep_aspect: bool = False) -> np.ndarray:
+    """
+    Scales camera frame to target monitor dimensions.
+    Guarantees that the entire canvas is covered (zero white margins).
+    """
+    if not keep_aspect:
+        return cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+
+    # Aspect ratio fit with sleek black background
+    h, w = img.shape[:2]
+    scale = min(target_w / w, target_h / h)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+    resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+    canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    x_offset = (target_w - new_w) // 2
+    y_offset = (target_h - new_h) // 2
+    canvas[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = resized
+    return canvas
+
+
 def load_config(config_path: str) -> Dict[str, Any]:
     if not os.path.isabs(config_path):
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -56,6 +109,7 @@ def annotate_frame(
     detections: List[DetectionResult],
     display_fps: float,
     inf_fps: float,
+    aspect_mode: str = "fill",
     depth_preview: np.ndarray = None
 ) -> np.ndarray:
     """Draws bounding boxes, class labels, metric distance tags, and HUD status bar."""
@@ -99,9 +153,9 @@ def annotate_frame(
         cv2.circle(annotated, (cx, cy), 3, dist_color, -1)
 
     # Top HUD Status Bar
-    status_bar = f"Video: {display_fps:.1f} FPS | AI: {inf_fps:.1f} FPS | Objects: {len(detections)} | [ESC/q: Quit | f: Fullscreen]"
+    status_bar = f"Video: {display_fps:.0f} FPS | AI: {inf_fps:.0f} FPS | Objects: {len(detections)} | [ESC/q: Quit | f: Fullscreen | a: Aspect ({aspect_mode})]"
     cv2.rectangle(annotated, (0, 0), (w, 26), (20, 20, 20), -1)
-    cv2.putText(annotated, status_bar, (10, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 230, 255), 1, cv2.LINE_AA)
+    cv2.putText(annotated, status_bar, (10, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 230, 255), 1, cv2.LINE_AA)
 
     # Monocular depth map Picture-in-Picture preview (if enabled)
     if depth_preview is not None:
@@ -118,13 +172,14 @@ class AsyncPipeline:
     def __init__(self, config: Dict[str, Any], fullscreen: bool = True):
         self.config = config
         self.fullscreen = fullscreen
+        self.aspect_mode = "fill"  # "fill" (edge-to-edge stretch) or "aspect" (preserved aspect ratio on black)
 
         cam_cfg = config.get("camera", {})
         det_cfg = config.get("detector", {})
         dist_cfg = config.get("distance", {})
         sys_cfg = config.get("system", {})
 
-        # 1. Camera Capture
+        # 1. Camera Capture (zero-latency single buffer)
         self.camera = CameraStream(
             source=cam_cfg.get("source", 0),
             width=cam_cfg.get("width", 640),
@@ -135,7 +190,7 @@ class AsyncPipeline:
             fallback_synthetic=cam_cfg.get("fallback_synthetic", True)
         )
 
-        # 2. Edge Detector
+        # 2. Edge Detector (imgsz 320 for maximum edge inference speed)
         self.detector = EdgeDetector(
             model_path=det_cfg.get("model_path", "weights/yolov8n.pt"),
             conf_threshold=det_cfg.get("conf_threshold", 0.35),
@@ -148,6 +203,7 @@ class AsyncPipeline:
         # 3. Distance Engine
         self.distance_engine = DistanceEstimator(config=config)
         self.depth_interval = dist_cfg.get("depth_interval", 5)
+        self.is_depth_mode = self.distance_engine.mode in ["midas", "both"]
 
         # Shared thread-safe state
         self.lock = threading.Lock()
@@ -174,7 +230,7 @@ class AsyncPipeline:
         while self.running:
             ret, frame = self.camera.read()
             if not ret or frame is None:
-                time.sleep(0.005)
+                time.sleep(0.002)
                 continue
 
             frame_idx += 1
@@ -188,8 +244,8 @@ class AsyncPipeline:
             # 1. Run detection
             dets = self.detector.detect(frame)
 
-            # 2. Run distance & depth
-            compute_depth = (frame_idx % self.depth_interval == 0)
+            # 2. Run distance (optical pinhole in <0.05ms)
+            compute_depth = self.is_depth_mode and (frame_idx % self.depth_interval == 0)
             dets, depth_vis = self.distance_engine.process(frame, dets, compute_depth=compute_depth)
 
             # 3. Update shared state
@@ -198,11 +254,13 @@ class AsyncPipeline:
                 if depth_vis is not None:
                     self.latest_depth_vis = depth_vis
 
+            # Minimal yield to keep CPU responsive
             time.sleep(0.001)
 
     def run_display_loop(self):
         window_name = self.config.get("display", {}).get("window_name", "RPi Edge Vision & Distance")
         use_gui = False
+        screen_w, screen_h = get_screen_resolution()
 
         if is_qt_gui_supported():
             try:
@@ -212,9 +270,9 @@ class AsyncPipeline:
                 else:
                     cv2.resizeWindow(window_name, 640, 480)
                 use_gui = True
-                mode_str = "Full Screen" if self.fullscreen else "Windowed"
-                logger.info(f"✓ Native OpenCV GUI window active: '{window_name}' ({mode_str} mode)")
-                logger.info("ℹ Controls: Press 'q' or ESC in the window to quit. Press 'f' to toggle fullscreen.")
+                mode_str = f"Full Screen ({screen_w}x{screen_h})" if self.fullscreen else "Windowed (640x480)"
+                logger.info(f"✓ Native OpenCV GUI window active: '{window_name}' [{mode_str}]")
+                logger.info("ℹ Controls: [ESC/q] Exit | [f] Toggle Fullscreen | [a] Toggle Aspect Mode (Fill / Fit)")
             except Exception as e:
                 logger.warning(f"Could not open GUI window ({e}). Running in terminal console mode.")
         else:
@@ -229,7 +287,7 @@ class AsyncPipeline:
             while self.running:
                 ret, frame = self.camera.read()
                 if not ret or frame is None:
-                    time.sleep(0.005)
+                    time.sleep(0.002)
                     continue
 
                 frame_count += 1
@@ -244,13 +302,20 @@ class AsyncPipeline:
                     depth_preview = self.latest_depth_vis
                     inf_fps = self.inf_fps
 
-                annotated = annotate_frame(frame, dets, display_fps, inf_fps, depth_preview)
+                annotated = annotate_frame(frame, dets, display_fps, inf_fps, aspect_mode=self.aspect_mode, depth_preview=depth_preview)
 
                 # Render to local OpenCV GUI Window
                 if use_gui:
                     try:
-                        cv2.imshow(window_name, annotated)
+                        if self.fullscreen:
+                            keep_aspect = (self.aspect_mode == "aspect")
+                            display_frame = scale_frame_to_screen(annotated, screen_w, screen_h, keep_aspect=keep_aspect)
+                        else:
+                            display_frame = annotated
+
+                        cv2.imshow(window_name, display_frame)
                         key = cv2.waitKey(1) & 0xFF
+
                         if key in (27, ord("q"), ord("Q")):
                             logger.info("Exit requested by user ('q' or ESC pressed). Shutting down...")
                             break
@@ -258,8 +323,14 @@ class AsyncPipeline:
                             self.fullscreen = not self.fullscreen
                             prop = cv2.WINDOW_FULLSCREEN if self.fullscreen else cv2.WINDOW_NORMAL
                             cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, prop)
-                            mode = "Enabled" if self.fullscreen else "Disabled"
-                            logger.info(f"Fullscreen toggled: {mode}")
+                            if not self.fullscreen:
+                                cv2.resizeWindow(window_name, 640, 480)
+                            status = "Full Screen" if self.fullscreen else "Windowed"
+                            logger.info(f"Display mode toggled: {status}")
+                        elif key in (ord("a"), ord("A")):
+                            self.aspect_mode = "aspect" if self.aspect_mode == "fill" else "fill"
+                            logger.info(f"Aspect mode toggled: {self.aspect_mode.upper()} (Fill=Edge-to-edge | Aspect=4:3 on black)")
+
                     except Exception as e:
                         logger.warning(f"cv2.imshow failed: {e}. Switching to console output.")
                         use_gui = False
@@ -270,8 +341,6 @@ class AsyncPipeline:
                     det_summary = ", ".join(det_strs) if det_strs else "No objects detected"
                     logger.info(f"[TELEMETRY] Video: {display_fps:.0f} FPS | AI: {inf_fps:.0f} FPS | {det_summary}")
                     last_console_time = now
-
-                time.sleep(0.008)
 
         except KeyboardInterrupt:
             logger.info("Interrupted by user.")
@@ -298,6 +367,7 @@ def main():
     parser.add_argument("--imgsz", type=int, default=None, help="Override inference size (e.g. 320 for max speed)")
     parser.add_argument("--mode", type=str, default=None, help="Distance mode: 'pinhole' (fastest), 'both', or 'midas'")
     parser.add_argument("--windowed", action="store_true", help="Launch in windowed mode instead of full screen")
+    parser.add_argument("--aspect", choices=["fill", "aspect"], default="fill", help="Full-screen aspect mode: fill (stretch edge-to-edge) or aspect (fit on black)")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -317,6 +387,7 @@ def main():
         config=config,
         fullscreen=is_fullscreen
     )
+    pipeline.aspect_mode = args.aspect
     pipeline.start()
     pipeline.run_display_loop()
     sys.exit(0)

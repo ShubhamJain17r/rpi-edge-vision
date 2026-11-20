@@ -224,7 +224,12 @@ class DistanceEstimator:
         model_path = midas_cfg.get("model_path", "weights/midas_v21_small.onnx")
         input_size = tuple(midas_cfg.get("input_size", [256, 256]))
         num_threads = config.get("system", {}).get("num_threads", 4)
-        self.midas = MidasDepthEstimator(model_path=model_path, input_size=input_size, num_threads=num_threads)
+
+        # Lazy-load MiDaS only when depth mode is actively requested
+        if self.mode in ["midas", "both"]:
+            self.midas = MidasDepthEstimator(model_path=model_path, input_size=input_size, num_threads=num_threads)
+        else:
+            self.midas = None
 
         smoothing_enabled = dist_cfg.get("enable_smoothing", True)
         self.smoother = TemporalDistanceSmoother(alpha=0.65) if smoothing_enabled else None
@@ -237,7 +242,7 @@ class DistanceEstimator:
 
     def update_depth_async(self, frame: np.ndarray):
         """Dispatches depth inference in background worker so it never slows down the main loop."""
-        if not self.midas.is_loaded or self.is_computing_depth:
+        if self.midas is None or not self.midas.is_loaded or self.is_computing_depth:
             return
 
         def _worker(img_copy):
