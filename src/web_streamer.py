@@ -128,7 +128,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="header">
-        <h1>🍓 RPi-4 / RPi-5 Edge Vision & Distance Telemetry</h1>
+        <h1>🍓 RPi-4 / RPi-5 Edge Vision & Distance Dashboard</h1>
         <div class="badge">● LIVE LOCAL INFERENCE</div>
     </div>
 
@@ -259,7 +259,7 @@ class WebStreamer:
             time.sleep(0.03)
 
     def update_frame(self, frame: np.ndarray, fps: float, detections: List[Any]):
-        """Encodes annotated frame to JPEG and stores telemetry."""
+        """Encodes annotated frame to JPEG and stores telemetry, safely converting numpy types."""
         if frame is None:
             return
 
@@ -269,15 +269,15 @@ class WebStreamer:
             with self.lock:
                 self.latest_jpeg = buffer.tobytes()
                 self.telemetry_data = {
-                    "fps": round(fps, 1),
-                    "timestamp": time.time(),
+                    "fps": float(round(fps, 1)),
+                    "timestamp": float(time.time()),
                     "detections": [
                         {
-                            "class_name": d.class_name,
-                            "confidence": round(d.confidence, 2),
-                            "distance_m": d.distance_m,
-                            "relative_depth": d.relative_depth,
-                            "bbox": d.bbox
+                            "class_name": str(d.class_name),
+                            "confidence": float(round(d.confidence, 2)),
+                            "distance_m": float(d.distance_m) if d.distance_m is not None else None,
+                            "relative_depth": float(d.relative_depth) if d.relative_depth is not None else None,
+                            "bbox": [int(coord) for coord in d.bbox]
                         }
                         for d in detections
                     ]
