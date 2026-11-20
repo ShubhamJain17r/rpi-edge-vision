@@ -19,7 +19,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from src.camera import SyntheticCamera, CameraStream
 from src.detector import EdgeDetector, DetectionResult
 from src.distance import PinholeDistanceEstimator, DistanceEstimator, TemporalDistanceSmoother
-from src.web_streamer import WebStreamer
 from src.pipeline import load_config, annotate_frame
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -141,29 +140,6 @@ class TestEdgeVisionPipeline(unittest.TestCase):
         annotated = annotate_frame(frame, [det], display_fps=29.8, inf_fps=18.4)
         self.assertEqual(annotated.shape, frame.shape)
         logger.info("✓ Frame annotation verified.")
-
-    def test_07_web_streamer(self):
-        """Test WebStreamer accepts frames and formats telemetry."""
-        streamer = WebStreamer(port=8888)
-        cam = SyntheticCamera(width=320, height=240)
-        _, frame = cam.read()
-
-        det = DetectionResult(
-            bbox=(10, 10, 50, 80),
-            class_id=0,
-            class_name="person",
-            confidence=0.90,
-            width_px=40,
-            height_px=70,
-            center=(30, 45),
-            distance_m=1.85
-        )
-
-        streamer.update_frame(frame, 30.0, [det])
-        self.assertIsNotNone(streamer.latest_jpeg)
-        self.assertEqual(len(streamer.telemetry_data["detections"]), 1)
-        logger.info("✓ Web streamer frame encoding and telemetry verified.")
-
 
 def main():
     logger.info("Running Edge Vision Pipeline Test Suite...")

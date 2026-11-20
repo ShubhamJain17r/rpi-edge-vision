@@ -53,14 +53,8 @@ distance:
     input_size: [256, 256]
 
 display:
-  gui_window: false             # ⚡ Show native, high-performance OpenCV window (cv2.imshow)
+  fullscreen: true              # ⚡ Full-Screen mode (press "f" in window to toggle, "q" or ESC to quit)
   window_name: "RPi Edge Vision & Distance"
-
-web_streamer:
-  enabled: true                # Set false to disable web server and save CPU when using GUI window
-  host: "0.0.0.0"
-  port: 8080
-  quality: 70                  # Efficient JPEG compression
 
 system:
   num_threads: 4               # 4 cores on both RPi 4 (Cortex-A72) and RPi 5 (Cortex-A76)

@@ -1,10 +1,11 @@
 """
-High-FPS Edge AI Vision & Distance Pipeline.
-Optimized for Raspberry Pi 4 & 5 with:
-- Asynchronous threaded inference (camera @ 30 FPS, detection decoupled)
-- Safe GUI detection (guards against Qt xcb crashes)
-- Real-time terminal console telemetry in --no-web mode
-- Instantaneous (<0.05ms) optical pinhole metric distance estimation
+Full-Screen Edge AI Vision & Distance Pipeline.
+Optimized for Raspberry Pi 4 & 5 (and local testing on Linux PC) with:
+- Dedicated Full-Screen OpenCV GUI window (cv2.imshow)
+- Real-time YOLOv8 object detection + optical pinhole metric distance estimation
+- Asynchronous decoupled worker architecture for 30 FPS camera capture and high-speed inference
+- Clean exit on "ESC" or "q" without container respawn
+- Press "f" to toggle full-screen / windowed mode
 """
 
 import os
@@ -23,7 +24,6 @@ import cv2
 from src.camera import CameraStream
 from src.detector import EdgeDetector, DetectionResult
 from src.distance import DistanceEstimator
-from src.web_streamer import WebStreamer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ def annotate_frame(
     inf_fps: float,
     depth_preview: np.ndarray = None
 ) -> np.ndarray:
-    """Draws rich bounding boxes, class labels, distance metrics, and PIP depth preview."""
+    """Draws bounding boxes, class labels, metric distance tags, and HUD status bar."""
     annotated = frame.copy()
     h, w = annotated.shape[:2]
 
@@ -78,7 +78,7 @@ def annotate_frame(
             label_parts.append(f"depth: {det.relative_depth}")
         label = " | ".join(label_parts)
 
-        (text_w, text_h), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        (text_w, text_h), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)
         bg_y1 = max(0, y1 - text_h - 8)
         bg_y2 = y1
         cv2.rectangle(annotated, (x1, bg_y1), (x1 + text_w + 10, bg_y2), text_bg_color, -1)
@@ -89,7 +89,7 @@ def annotate_frame(
             label,
             (x1 + 5, y1 - 4),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.45,
+            0.48,
             (255, 255, 255),
             1,
             cv2.LINE_AA
@@ -98,31 +98,31 @@ def annotate_frame(
         cx, cy = det.center
         cv2.circle(annotated, (cx, cy), 3, dist_color, -1)
 
-    status_bar = f"Video: {display_fps:.1f} FPS | AI: {inf_fps:.1f} FPS | Objects: {len(detections)}"
-    cv2.rectangle(annotated, (0, 0), (w, 24), (20, 20, 20), -1)
-    cv2.putText(annotated, status_bar, (10, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 230, 255), 1, cv2.LINE_AA)
+    # Top HUD Status Bar
+    status_bar = f"Video: {display_fps:.1f} FPS | AI: {inf_fps:.1f} FPS | Objects: {len(detections)} | [ESC/q: Quit | f: Fullscreen]"
+    cv2.rectangle(annotated, (0, 0), (w, 26), (20, 20, 20), -1)
+    cv2.putText(annotated, status_bar, (10, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 230, 255), 1, cv2.LINE_AA)
 
+    # Monocular depth map Picture-in-Picture preview (if enabled)
     if depth_preview is not None:
         pip_w = 140
         pip_h = 105
         pip_depth = cv2.resize(depth_preview, (pip_w, pip_h))
         cv2.rectangle(pip_depth, (0, 0), (pip_w - 1, pip_h - 1), (255, 255, 255), 1)
-        annotated[28:28 + pip_h, w - pip_w - 8:w - 8] = pip_depth
+        annotated[30:30 + pip_h, w - pip_w - 8:w - 8] = pip_depth
 
     return annotated
 
 
 class AsyncPipeline:
-    def __init__(self, config: Dict[str, Any], show_gui: bool = False, enable_web: bool = True):
+    def __init__(self, config: Dict[str, Any], fullscreen: bool = True):
         self.config = config
-        self.show_gui = show_gui
-        self.enable_web = enable_web
+        self.fullscreen = fullscreen
 
         cam_cfg = config.get("camera", {})
         det_cfg = config.get("detector", {})
         dist_cfg = config.get("distance", {})
         sys_cfg = config.get("system", {})
-        web_cfg = config.get("web_streamer", {})
 
         # 1. Camera Capture
         self.camera = CameraStream(
@@ -148,16 +148,6 @@ class AsyncPipeline:
         # 3. Distance Engine
         self.distance_engine = DistanceEstimator(config=config)
         self.depth_interval = dist_cfg.get("depth_interval", 5)
-
-        # 4. Web Streamer
-        self.streamer = None
-        if self.enable_web and web_cfg.get("enabled", True):
-            self.streamer = WebStreamer(
-                host=web_cfg.get("host", "0.0.0.0"),
-                port=web_cfg.get("port", 8080),
-                quality=web_cfg.get("quality", 70)
-            )
-            self.streamer.start()
 
         # Shared thread-safe state
         self.lock = threading.Lock()
@@ -214,26 +204,26 @@ class AsyncPipeline:
         window_name = self.config.get("display", {}).get("window_name", "RPi Edge Vision & Distance")
         use_gui = False
 
-        if self.show_gui:
-            if is_qt_gui_supported():
-                try:
-                    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        if is_qt_gui_supported():
+            try:
+                cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                if self.fullscreen:
+                    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+                else:
                     cv2.resizeWindow(window_name, 640, 480)
-                    use_gui = True
-                    logger.info(f"✓ Native OpenCV GUI window active: '{window_name}'")
-                except Exception as e:
-                    logger.warning(f"Could not open GUI window ({e}). Running in terminal console mode.")
-            else:
-                logger.info("ℹ GUI window not available (Qt X11 libraries missing). Running in terminal console mode.")
+                use_gui = True
+                mode_str = "Full Screen" if self.fullscreen else "Windowed"
+                logger.info(f"✓ Native OpenCV GUI window active: '{window_name}' ({mode_str} mode)")
+                logger.info("ℹ Controls: Press 'q' or ESC in the window to quit. Press 'f' to toggle fullscreen.")
+            except Exception as e:
+                logger.warning(f"Could not open GUI window ({e}). Running in terminal console mode.")
+        else:
+            logger.info("ℹ Display not available (Qt X11 libraries or $DISPLAY missing). Running in terminal console mode.")
 
         display_fps = 0.0
         frame_count = 0
         last_fps_time = time.time()
         last_console_time = time.time()
-
-        if not use_gui and self.streamer is None:
-            logger.info("Running in Maximum Performance Mode (--no-web).")
-            logger.info("Streaming live detections and metric distance telemetry below:")
 
         try:
             while self.running:
@@ -256,24 +246,26 @@ class AsyncPipeline:
 
                 annotated = annotate_frame(frame, dets, display_fps, inf_fps, depth_preview)
 
-                # 1. Web Streamer
-                if self.streamer is not None:
-                    self.streamer.update_frame(annotated, display_fps, dets)
-
-                # 2. OpenCV GUI Window
+                # Render to local OpenCV GUI Window
                 if use_gui:
                     try:
                         cv2.imshow(window_name, annotated)
                         key = cv2.waitKey(1) & 0xFF
-                        if key == ord('q') or key == 27:
+                        if key in (27, ord("q"), ord("Q")):
+                            logger.info("Exit requested by user ('q' or ESC pressed). Shutting down...")
                             break
+                        elif key in (ord("f"), ord("F")):
+                            self.fullscreen = not self.fullscreen
+                            prop = cv2.WINDOW_FULLSCREEN if self.fullscreen else cv2.WINDOW_NORMAL
+                            cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, prop)
+                            mode = "Enabled" if self.fullscreen else "Disabled"
+                            logger.info(f"Fullscreen toggled: {mode}")
                     except Exception as e:
                         logger.warning(f"cv2.imshow failed: {e}. Switching to console output.")
                         use_gui = False
 
-                # 3. Live Console Telemetry
-                interval = 0.75 if (not use_gui and self.streamer is None) else 3.0
-                if now - last_console_time >= interval:
+                # Live Console Telemetry (every ~2 seconds)
+                if now - last_console_time >= 2.0:
                     det_strs = [f"{d.class_name}({int(d.confidence*100)}%, dist={d.distance_m}m)" for d in dets]
                     det_summary = ", ".join(det_strs) if det_strs else "No objects detected"
                     logger.info(f"[TELEMETRY] Video: {display_fps:.0f} FPS | AI: {inf_fps:.0f} FPS | {det_summary}")
@@ -305,8 +297,7 @@ def main():
     parser.add_argument("--model", type=str, default=None, help="Override detection model path (.pt or .onnx)")
     parser.add_argument("--imgsz", type=int, default=None, help="Override inference size (e.g. 320 for max speed)")
     parser.add_argument("--mode", type=str, default=None, help="Distance mode: 'pinhole' (fastest), 'both', or 'midas'")
-    parser.add_argument("--no-web", action="store_true", help="Disable web streamer to save CPU cycles")
-    parser.add_argument("--gui", action="store_true", help="Enable OpenCV GUI window (requires working Qt/X11)")
+    parser.add_argument("--windowed", action="store_true", help="Launch in windowed mode instead of full screen")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -319,13 +310,16 @@ def main():
     if args.mode is not None:
         config["distance"]["mode"] = args.mode
 
+    fullscreen_default = config.get("display", {}).get("fullscreen", True)
+    is_fullscreen = False if args.windowed else fullscreen_default
+
     pipeline = AsyncPipeline(
         config=config,
-        show_gui=args.gui or config.get("display", {}).get("gui_window", False),
-        enable_web=not args.no_web
+        fullscreen=is_fullscreen
     )
     pipeline.start()
     pipeline.run_display_loop()
+    sys.exit(0)
 
 
 if __name__ == "__main__":

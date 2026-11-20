@@ -16,9 +16,11 @@ A high-performance, edge-optimized computer vision and distance estimation syste
   - **Camera Thread**: Captures live frames at hardware **30 FPS**.
   - **Inference Worker**: Runs YOLO object detection asynchronously at **~15–25 FPS** (at `imgsz: 320`) without stalling video capture.
   - **Display Thread**: Renders bounding boxes and distance tags at a smooth **25–30 FPS**.
-- **🖥️ Dual Display Modes**:
-  - **Native OpenCV GUI Window (`cv2.imshow`)**: Hardware-accelerated local display on your connected monitor/HDMI screen.
-  - **Headless Web Dashboard**: Live HTTP MJPEG stream at `http://<rpi-ip>:8080` for remote viewing on phones/laptops.
+- **🖥️ Dedicated Full-Screen Native OpenCV GUI Window (`cv2.imshow`)**:
+  - Automatically opens in **immersive Full-Screen mode** on your monitor / laptop screen.
+  - Zero web server overhead, zero JPEG compression artifacts, maximum hardware FPS.
+  - Real-time overlay of bounding boxes, object class, confidence %, and optical distance in meters.
+  - Interactive hotkeys: **`ESC` / `q`** to cleanly exit, **`f`** to toggle full-screen.
 - **📏 Dual Distance Calculation Engine**:
   - **Instantaneous Optical Pinhole Model (<0.05ms)**: Calculates real-world metric distance (meters/centimeters) using perspective camera geometry and known object dimensions.
   - **Monocular AI Depth Model (MiDaS v2.1 Small)**: Per-pixel relative inverse disparity running in a background worker thread to never block the main vision loop.

@@ -52,7 +52,6 @@ COPY data/ ./data/
 RUN python3 scripts/download_weights.py
 
 # Expose web video feed and telemetry dashboard port
-EXPOSE 8080
 
 # Health check verifies the pipeline process is actively running
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
