@@ -5,7 +5,7 @@
 FROM python:3.11-slim-bookworm
 
 LABEL maintainer="Edge AI Lab"
-LABEL description="Edge AI Vision & Distance Calculation container for Raspberry Pi 4 & 5"
+LABEL description="Edge AI Vision & Distance Calculation container for Raspberry Pi 4 & 5 (CPU-Optimized)"
 
 # Prevent interactive prompts during apt install
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -31,8 +31,9 @@ WORKDIR /app
 # Copy dependency requirements first to leverage Docker layer caching
 COPY requirements.txt .
 
-# Install Python edge dependencies with precompiled wheels
+# Install CPU-only PyTorch & Torchvision first, completely preventing CUDA/NVIDIA bloat
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy weights, configs, source code and scripts

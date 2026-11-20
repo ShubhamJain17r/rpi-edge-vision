@@ -1,10 +1,6 @@
-# Edge AI requirements for Raspberry Pi 4 & 5 (ARM64 / aarch64)
-# Pinned for maximum stability with precompiled wheels on Debian Bookworm / Python 3.11
-
+# Edge AI requirements for Raspberry Pi 4 & 5 (CPU Only - No CUDA/NVIDIA bloat)
 numpy<2.0.0
 opencv-python-headless>=4.8.0.76
-torch>=2.2.0
-torchvision>=0.17.0
 ultralytics>=8.1.0
 onnxruntime>=1.17.0
 Pillow>=10.0.0
