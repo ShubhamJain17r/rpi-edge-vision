@@ -72,15 +72,12 @@ def get_screen_resolution() -> Tuple[int, int]:
     return 1920, 1080
 
 
-def scale_frame_to_screen(img: np.ndarray, target_w: int, target_h: int, keep_aspect: bool = False) -> np.ndarray:
+def scale_frame_to_screen(img: np.ndarray, target_w: int, target_h: int) -> np.ndarray:
     """
-    Scales camera frame to target monitor dimensions.
-    Guarantees that the entire canvas is covered (zero white margins).
+    Scales camera frame to target monitor dimensions while STRICTLY PRESERVING
+    the camera's native aspect ratio (e.g. 4:3 or 16:9).
+    Centers the scaled video on a solid pitch-black canvas with zero geometric distortion.
     """
-    if not keep_aspect:
-        return cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
-
-    # Aspect ratio fit with sleek black background
     h, w = img.shape[:2]
     scale = min(target_w / w, target_h / h)
     new_w = int(w * scale)
@@ -109,7 +106,6 @@ def annotate_frame(
     detections: List[DetectionResult],
     display_fps: float,
     inf_fps: float,
-    aspect_mode: str = "fill",
     depth_preview: np.ndarray = None
 ) -> np.ndarray:
     """Draws bounding boxes, class labels, metric distance tags, and HUD status bar."""
@@ -153,9 +149,9 @@ def annotate_frame(
         cv2.circle(annotated, (cx, cy), 3, dist_color, -1)
 
     # Top HUD Status Bar
-    status_bar = f"Video: {display_fps:.0f} FPS | AI: {inf_fps:.0f} FPS | Objects: {len(detections)} | [ESC/q: Quit | f: Fullscreen | a: Aspect ({aspect_mode})]"
+    status_bar = f"Video: {display_fps:.0f} FPS | AI: {inf_fps:.0f} FPS | Objects: {len(detections)} | [ESC/q: Quit | f: Fullscreen/Windowed]"
     cv2.rectangle(annotated, (0, 0), (w, 26), (20, 20, 20), -1)
-    cv2.putText(annotated, status_bar, (10, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 230, 255), 1, cv2.LINE_AA)
+    cv2.putText(annotated, status_bar, (10, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 230, 255), 1, cv2.LINE_AA)
 
     # Monocular depth map Picture-in-Picture preview (if enabled)
     if depth_preview is not None:
@@ -172,7 +168,6 @@ class AsyncPipeline:
     def __init__(self, config: Dict[str, Any], fullscreen: bool = True):
         self.config = config
         self.fullscreen = fullscreen
-        self.aspect_mode = "fill"  # "fill" (edge-to-edge stretch) or "aspect" (preserved aspect ratio on black)
 
         cam_cfg = config.get("camera", {})
         det_cfg = config.get("detector", {})
@@ -302,14 +297,13 @@ class AsyncPipeline:
                     depth_preview = self.latest_depth_vis
                     inf_fps = self.inf_fps
 
-                annotated = annotate_frame(frame, dets, display_fps, inf_fps, aspect_mode=self.aspect_mode, depth_preview=depth_preview)
+                annotated = annotate_frame(frame, dets, display_fps, inf_fps, depth_preview=depth_preview)
 
                 # Render to local OpenCV GUI Window
                 if use_gui:
                     try:
                         if self.fullscreen:
-                            keep_aspect = (self.aspect_mode == "aspect")
-                            display_frame = scale_frame_to_screen(annotated, screen_w, screen_h, keep_aspect=keep_aspect)
+                            display_frame = scale_frame_to_screen(annotated, screen_w, screen_h)
                         else:
                             display_frame = annotated
 
@@ -325,11 +319,8 @@ class AsyncPipeline:
                             cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, prop)
                             if not self.fullscreen:
                                 cv2.resizeWindow(window_name, 640, 480)
-                            status = "Full Screen" if self.fullscreen else "Windowed"
+                            status = "Full Screen (Aspect Preserved)" if self.fullscreen else "Windowed (640x480)"
                             logger.info(f"Display mode toggled: {status}")
-                        elif key in (ord("a"), ord("A")):
-                            self.aspect_mode = "aspect" if self.aspect_mode == "fill" else "fill"
-                            logger.info(f"Aspect mode toggled: {self.aspect_mode.upper()} (Fill=Edge-to-edge | Aspect=4:3 on black)")
 
                     except Exception as e:
                         logger.warning(f"cv2.imshow failed: {e}. Switching to console output.")
@@ -367,7 +358,6 @@ def main():
     parser.add_argument("--imgsz", type=int, default=None, help="Override inference size (e.g. 320 for max speed)")
     parser.add_argument("--mode", type=str, default=None, help="Distance mode: 'pinhole' (fastest), 'both', or 'midas'")
     parser.add_argument("--windowed", action="store_true", help="Launch in windowed mode instead of full screen")
-    parser.add_argument("--aspect", choices=["fill", "aspect"], default="fill", help="Full-screen aspect mode: fill (stretch edge-to-edge) or aspect (fit on black)")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -387,7 +377,6 @@ def main():
         config=config,
         fullscreen=is_fullscreen
     )
-    pipeline.aspect_mode = args.aspect
     pipeline.start()
     pipeline.run_display_loop()
     sys.exit(0)

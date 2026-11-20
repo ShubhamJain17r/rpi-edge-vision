@@ -37,10 +37,10 @@ fi
 
 echo "=========================================================="
 echo " Opening Full-Screen Video Window on screen..."
+echo " Aspect Ratio: Strictly Preserved (Zero Distortion / Zero White Borders)"
 echo " Hotkeys:"
 echo "   [ESC] or [q] : Cleanly exit and close application"
 echo "   [f]          : Toggle between Full-Screen and Windowed"
-echo "   [a]          : Toggle Aspect Mode (Full Stretch vs Aspect Fit on Black)"
 echo "=========================================================="
 
 exec docker run --rm \

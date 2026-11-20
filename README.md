@@ -95,12 +95,11 @@ chmod +x build.sh run.sh
 ./run.sh
 ```
 
-The native OpenCV window automatically pops up in **Full-Screen mode** scaled directly to your monitor's resolution, rendering the real-time webcam feed edge-to-edge (with zero white margins), live bounding boxes, distance estimates, and HUD telemetry.
+The native OpenCV window automatically pops up in **Full-Screen mode** scaled to your monitor's resolution. It **strictly preserves the camera's native aspect ratio (1:1 geometry)** with zero stretching or distortion, centered on a solid pitch-black canvas with zero white margins.
 
 #### 🎮 Interactive Hotkeys
 - **`ESC`** or **`q`**: Cleanly terminates the application and closes the container (will **never** pop back up).
 - **`f`**: Toggles between **Full-Screen** and **Windowed (640x480)** mode.
-- **`a`**: Toggles Aspect Ratio between **Fill** (edge-to-edge stretch) and **Aspect Fit** (4:3 aspect ratio on sleek black background).
 
 ---
 
@@ -110,10 +109,8 @@ The pipeline can be customized on launch:
 
 | Flag | Description | Example |
 |---|---|---|
-| `./run.sh` | Default: Full-screen OpenCV GUI with optical pinhole distance | `./run.sh` |
+| `./run.sh` | Default: Full-screen OpenCV GUI with true aspect ratio & pinhole distance | `./run.sh` |
 | `--windowed` | Launches in a standard 640x480 desktop window | `./run.sh --windowed` |
-| `--aspect fill` | Full stretch to 100% of display dimensions (default) | `./run.sh --aspect fill` |
-| `--aspect aspect` | Preserves 4:3 aspect ratio centered on black canvas | `./run.sh --aspect aspect` |
 | `--imgsz 320` | Sets inference size (320 for 15-25+ FPS, 416 for balance, 640 for small objects) | `./run.sh --imgsz 320` |
 | `--mode pinhole` | Distance mode: `pinhole` (<0.05ms) or `both` (includes async MiDaS depth) | `./run.sh --mode pinhole` |
 
