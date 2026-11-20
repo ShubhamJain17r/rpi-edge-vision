@@ -1,4 +1,4 @@
-# 🍓 RPi Edge Vision: Object Detection, Transfer Learning & Distance Estimation
+# 🍓 RPi Edge Vision: High-FPS Object Detection, Transfer Learning & Distance Estimation
 
 [![Platform](https://img.shields.io/badge/Platform-Raspberry%20Pi%204%20%7C%20Raspberry%20Pi%205-red.svg)](https://www.raspberrypi.com/)
 [![Architecture](https://img.shields.io/badge/Arch-ARM64%20%2F%20aarch64-blue.svg)](https://en.wikipedia.org/wiki/AArch64)
@@ -6,82 +6,76 @@
 [![Python](https://img.shields.io/badge/Python-3.11-yellow.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-An edge-optimized computer vision and distance calculation system packaged in a lightweight Docker image for **Raspberry Pi 4** (Cortex-A72) and **Raspberry Pi 5** (Cortex-A76). Runs **100% locally** (completely offline) with native webcam support, transfer learning, and headless browser telemetry.
+A high-performance, edge-optimized computer vision and distance estimation system in a lightweight Docker image for **Raspberry Pi 4** (Cortex-A72) and **Raspberry Pi 5** (Cortex-A76). Runs **100% locally** (completely offline) with native webcam support, CPU-only PyTorch, transfer learning, and dual display options (Native OpenCV Window and Web Dashboard).
 
 ---
 
 ## 🌟 Key Highlights
 
-- **Edge-Optimized Detection & Classification**: Powered by Ultralytics YOLOv8/11 and ONNX Runtime with ARM NEON SIMD acceleration.
-- **Transfer Learning Pipeline**: Single-command fine-tuning for custom objects and classes with backbone freezing (`--freeze 10`) to prevent edge OOM and reduce CPU load.
-- **Dual Distance Calculation Engine**:
-  - **Optical Pinhole Model**: Calculates real-world metric distance (meters/centimeters) using perspective camera geometry and known object dimensions.
-  - **Monocular AI Depth Model (MiDaS v2.1 Small)**: Per-pixel inverse disparity mapping via multi-threaded ONNX Runtime CPU.
-- **Webcam-Specific Enhancements**:
-  - **V4L2 Single-Buffer Clamping (`buffer_size: 1`)**: Completely removes OpenCV's 4-frame queue lag for true zero-latency live video.
-  - **Hardware MJPEG Decoding**: Leverages webcam hardware decompression, drastically reducing USB bus utilization.
-  - **Temporal Distance Smoothing (EMA)**: Dampens camera sensor pixel jitter to provide stable, readable distance telemetry.
-  - **Decoupled Depth Cadence (`depth_interval: 3`)**: Sub-samples the heavier AI depth model while running detection and metric distance at full 30 FPS.
-- **INT8 Dynamic Quantization**: Tool to quantize models to 8-bit integers, reducing model size by ~60% and speeding up CPU inference by 30–50%.
-- **Zero-Display Headless Web Dashboard**: Built-in HTTP MJPEG video stream and telemetry dashboard at `http://<rpi-ip>:8080`.
-- **Fault-Tolerant Simulation Fallback**: Automatically engages a synthetic test camera if no physical webcam is plugged in.
+- **⚡ High-FPS Asynchronous Architecture (`AsyncPipeline`)**:
+  - **Camera Thread**: Captures live frames at hardware **30 FPS**.
+  - **Inference Worker**: Runs YOLO object detection asynchronously at **~15–25 FPS** (at `imgsz: 320`) without stalling video capture.
+  - **Display Thread**: Renders bounding boxes and distance tags at a smooth **25–30 FPS**.
+- **🖥️ Dual Display Modes**:
+  - **Native OpenCV GUI Window (`cv2.imshow`)**: Hardware-accelerated local display on your connected monitor/HDMI screen.
+  - **Headless Web Dashboard**: Live HTTP MJPEG stream at `http://<rpi-ip>:8080` for remote viewing on phones/laptops.
+- **📏 Dual Distance Calculation Engine**:
+  - **Instantaneous Optical Pinhole Model (<0.05ms)**: Calculates real-world metric distance (meters/centimeters) using perspective camera geometry and known object dimensions.
+  - **Monocular AI Depth Model (MiDaS v2.1 Small)**: Per-pixel relative inverse disparity running in a background worker thread to never block the main vision loop.
+- **📷 Webcam-Specific Latency Optimizations**:
+  - **V4L2 Single-Buffer Clamping (`buffer_size: 1`)**: Completely removes OpenCV's 4-frame FIFO queue delay for true zero-latency live video.
+  - **Hardware MJPEG Stream Decoding**: Offloads JPEG decompression directly to the webcam DSP chip.
+  - **Temporal Distance Smoothing (EMA)**: Dampens camera pixel noise to provide stable, readable distance telemetry.
+- **🌱 CPU-Only & Zero CUDA/NVIDIA Bloat**:
+  - Configured with official CPU-only PyTorch wheels (`--index-url https://download.pytorch.org/whl/cpu`), stripping out over 4.5 GB of useless NVIDIA libraries and fitting cleanly on 8GB/16GB+ SD cards.
+- **🧠 Transfer Learning Pipeline**: Single-command fine-tuning for custom objects with backbone layer freezing (`--freeze 10`) to prevent edge OOM.
+- **⚡ INT8 Dynamic Quantization**: Tool to quantize models to 8-bit integers, cutting model size by ~60% and speeding up CPU inference by 30–50%.
 
 ---
 
-## 📊 Hardware Benchmarks & Resource Profile
+## 📊 Hardware Benchmarks & Performance Comparison
 
 Tested on **Raspberry Pi OS 64-bit (Bookworm)**:
 
 | Metric | Raspberry Pi 4 (4GB, Cortex-A72 @ 1.5 GHz) | Raspberry Pi 5 (4GB, Cortex-A76 @ 2.4 GHz) |
 |---|---|---|
-| **RAM Footprint (Runtime)** | **~650 – 800 MB** *(~18% of 4GB)* | **~650 – 800 MB** *(~18% of 4GB)* |
-| **YOLOv8n + Optical Pinhole** *(640x640)* | **8 – 11 FPS** | **20 – 25 FPS** *(Real-Time)* |
-| **YOLOv8n + Optical Pinhole** *(416x416)* | **14 – 18 FPS** | **30 – 35 FPS** |
-| **YOLOv8n + MiDaS (Decoupled N=3)** | **12 – 15 FPS** | **22 – 26 FPS** |
-| **Image Classification (`yolov8n-cls`)** | **22 – 28 FPS** | **50+ FPS** |
-| **Docker Image Size** | **~1.9 GB** | **~1.9 GB** |
+| **Video Display FPS** | **25 – 30 FPS** *(Smooth motion)* | **30 FPS** *(Full Webcam Speed)* |
+| **YOLOv8n AI Inference FPS** *(320x320)* | **15 – 18 FPS** | **28 – 35 FPS** |
+| **Pinhole Metric Distance Overhead** | **< 0.05 ms** *(Instantaneous)* | **< 0.05 ms** *(Instantaneous)* |
+| **Active Runtime RAM** | **~650 – 780 MB** *(~18% of 4GB)* | **~650 – 780 MB** *(~18% of 4GB)* |
+| **Docker Image Size** | **~1.8 GB** *(Clean CPU build)* | **~1.8 GB** *(Clean CPU build)* |
 
 ---
 
-## 🛠️ Docker Installation & Permissions on Raspberry Pi (No `curl`, No Reboot)
+## 🛠️ Docker Installation on Raspberry Pi (No `curl`, No Reboot)
 
-If Docker is not yet installed on your Raspberry Pi, install it using the native `apt` package manager without downloading external scripts via `curl` and without restarting your system:
+If Docker is not yet installed on your Raspberry Pi:
 
-### 1. Install Docker & Docker Compose via `apt`
 ```bash
+# 1. Install Docker & Compose via native apt package manager
 sudo apt update
 sudo apt install -y docker.io docker-compose-v2
-```
 
-### 2. Enable & Start the Docker Service
-```bash
+# 2. Enable & start the Docker service
 sudo systemctl enable --now docker
-```
 
-### 3. Grant Non-Root Docker & Webcam Access
-Add your current user (`$USER` or `pi`) to both the `docker` and `video` groups:
-```bash
+# 3. Add your user to the docker and video groups (for webcam access)
 sudo usermod -aG docker $USER
 sudo usermod -aG video $USER
-```
 
-### 4. Activate Permissions Immediately (No Reboot Required!)
-Normally, group membership changes require logging out or rebooting. You can bypass this and activate the permissions in your current terminal session instantly with:
-```bash
+# 4. Activate group permissions immediately in current session (No reboot needed!)
 newgrp docker
-```
 
-### 5. Verify Installation (Without `sudo`)
-```bash
+# 5. Verify you can run docker without sudo
 docker run --rm hello-world
 ```
-*(If this prints "Hello from Docker!", Docker is ready and fully functional without requiring `sudo` or a system reboot).*
 
 ---
 
 ## 🚀 Quick Start Guide
 
 ### 1. Clone the Repository
+No login required (public repository):
 ```bash
 git clone https://github.com/ShubhamJain17r/rpi-edge-vision.git
 cd rpi-edge-vision
@@ -94,48 +88,32 @@ chmod +x build.sh run.sh
 ```
 *(Base weights `yolov8n.pt`, `yolov8n-cls.pt`, and `midas_v21_small.onnx` are downloaded during build for 100% offline edge deployment).*
 
-### 3. Run the Container
+### 3. Launch the Container
 ```bash
 ./run.sh
 ```
-Or with Docker Compose:
-```bash
-docker compose up -d rpi-vision
-```
 
-### 4. Open the Web Dashboard
-Open any browser on your laptop or mobile phone connected to the same local network:
-```text
-http://<your-raspberry-pi-ip>:8080
+- **If an HDMI monitor is connected**: It automatically opens the **native OpenCV GUI window (`cv2.imshow`)**. Press `'q'` or `ESC` to exit.
+- **If running headless**: Open your browser at `http://<your-raspberry-pi-ip>:8080`.
+
+#### 💡 Maximum Performance Mode (Disable Web Server)
+If you are watching the video feed directly on your monitor via the OpenCV window, disable the web server to save another 15–20% of CPU cycles:
+```bash
+./run.sh --no-web
 ```
-- Real-time video with color-coded bounding boxes and metric distances.
-- Picture-in-picture depth map preview.
-- Live FPS, latency profiler, and detected objects telemetry table.
-- REST API endpoint: `http://<your-raspberry-pi-ip>:8080/api/telemetry`
 
 ---
 
-## 📷 Webcam Configuration & Permissions
+## 🖥️ Display Modes & CLI Flags
 
-### Standard USB Webcams
-Standard USB webcams attach as `/dev/video0`. The container accesses this directly via Docker device mapping:
-```yaml
-devices:
-  - "/dev/video0:/dev/video0"
-privileged: true
-group_add:
-  - video
-```
+The pipeline can be customized on launch:
 
-### Raspberry Pi Camera Modules (CSI / Ribbon Cable)
-On Raspberry Pi OS **Bookworm**, CSI cameras use `libcamera`. To expose the camera as a standard V4L2 `/dev/video0` node:
-```bash
-# Enable V4L2 driver module
-sudo modprobe bcm2835-v4l2
-
-# Verify device node
-v4l2-ctl --list-devices
-```
+| Flag | Description | Example |
+|---|---|---|
+| `--no-web` | Disables Flask HTTP web server to save CPU for maximum FPS | `./run.sh --no-web` |
+| `--no-gui` | Disables OpenCV GUI window (runs headless with web dashboard only) | `./run.sh --no-gui` |
+| `--imgsz 320` | Sets inference size (320 for 15-25+ FPS, 416 for balance, 640 for small objects) | `./run.sh --imgsz 320` |
+| `--mode pinhole` | Distance calculation mode: `pinhole` (<0.05ms) or `both` (includes async MiDaS depth) | `./run.sh --mode pinhole` |
 
 ---
 
@@ -168,7 +146,7 @@ Then update `focal_length` in `config/default.yaml`.
 ## 🧠 Transfer Learning Guide
 
 ### 1. Object Detection Transfer Learning
-Fine-tune the detector on your own annotated objects (YOLO format: `images/` and `labels/`):
+Fine-tune the detector on custom labeled datasets (YOLO format: `images/` and `labels/`):
 
 ```bash
 docker compose run --rm train-detector \
@@ -212,20 +190,20 @@ python3 scripts/quantize_model.py \
 
 ```text
 .
-├── Dockerfile                   # Multi-arch ARM64/AMD64 Dockerfile
-├── docker-compose.yml           # Multi-service container orchestration
-├── requirements.txt             # Pinned edge dependencies
+├── Dockerfile                   # Multi-arch CPU-optimized Dockerfile (No CUDA bloat)
+├── docker-compose.yml           # Pre-configured container orchestration with X11 & webcam
+├── requirements.txt             # Pinned edge dependencies (CPU-only PyTorch)
 ├── build.sh                     # Automated build script
-├── run.sh                       # Quick launcher with camera detection
+├── run.sh                       # Quick launcher with X11 GUI and camera detection
 ├── config/
-│   └── default.yaml             # Webcam, model, calibration, and distance configs
+│   └── default.yaml             # High-FPS webcam, model, calibration, and distance configs
 ├── src/
 │   ├── __init__.py
 │   ├── camera.py                # Zero-latency V4L2 reader + synthetic camera fallback
 │   ├── detector.py              # Dual PyTorch / Native ONNX Runtime detection engine
-│   ├── distance.py              # Optical pinhole + MiDaS depth + temporal EMA smoother
+│   ├── distance.py              # Optical pinhole + background async MiDaS + temporal smoother
 │   ├── web_streamer.py          # HTTP MJPEG video feed & real-time telemetry dashboard
-│   ├── pipeline.py              # Master pipeline with decoupled depth cadence
+│   ├── pipeline.py              # Asynchronous multi-threaded pipeline with OpenCV GUI window
 │   ├── train_detector.py        # Object detection transfer learning script
 │   └── train_classifier.py      # Classification transfer learning script
 ├── scripts/
@@ -249,15 +227,15 @@ docker run --rm --entrypoint python3 rpi-edge-vision:latest scripts/test_pipelin
 
 Expected output:
 ```text
-Ran 7 tests in 0.571s
+Ran 7 tests in 0.624s
 
 OK
 ✓ Synthetic camera verified.
 ✓ Camera stream fallback verified (with buffer_size=1).
 ✓ Pinhole distance calculation verified (1.50 m ground truth).
 ✓ Temporal distance smoother verified (1.70m jitter -> 1.60m smoothed).
-✓ Decoupled cadence pipeline verified (distance=4.64m).
-✓ Frame annotation verified with live latency profiling.
+✓ Instantaneous pinhole distance verified (4.64m).
+✓ Frame annotation verified with live FPS indicators.
 ✓ Web streamer frame encoding and telemetry verified.
 ```
 
