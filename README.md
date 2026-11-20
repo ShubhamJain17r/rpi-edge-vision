@@ -43,6 +43,42 @@ Tested on **Raspberry Pi OS 64-bit (Bookworm)**:
 
 ---
 
+## 🛠️ Docker Installation & Permissions on Raspberry Pi (No `curl`, No Reboot)
+
+If Docker is not yet installed on your Raspberry Pi, install it using the native `apt` package manager without downloading external scripts via `curl` and without restarting your system:
+
+### 1. Install Docker & Docker Compose via `apt`
+```bash
+sudo apt update
+sudo apt install -y docker.io docker-compose-v2
+```
+
+### 2. Enable & Start the Docker Service
+```bash
+sudo systemctl enable --now docker
+```
+
+### 3. Grant Non-Root Docker & Webcam Access
+Add your current user (`$USER` or `pi`) to both the `docker` and `video` groups:
+```bash
+sudo usermod -aG docker $USER
+sudo usermod -aG video $USER
+```
+
+### 4. Activate Permissions Immediately (No Reboot Required!)
+Normally, group membership changes require logging out or rebooting. You can bypass this and activate the permissions in your current terminal session instantly with:
+```bash
+newgrp docker
+```
+
+### 5. Verify Installation (Without `sudo`)
+```bash
+docker run --rm hello-world
+```
+*(If this prints "Hello from Docker!", Docker is ready and fully functional without requiring `sudo` or a system reboot).*
+
+---
+
 ## 🚀 Quick Start Guide
 
 ### 1. Clone the Repository
