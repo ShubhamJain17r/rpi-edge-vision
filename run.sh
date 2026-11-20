@@ -38,12 +38,15 @@ fi
 
 IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
 
-# Check if --no-web is requested
+# Check arguments
 NO_WEB=false
+HAS_GUI=false
 for arg in "$@"; do
     if [ "$arg" == "--no-web" ]; then
         NO_WEB=true
-        break
+    fi
+    if [ "$arg" == "--gui" ]; then
+        HAS_GUI=true
     fi
 done
 
@@ -63,14 +66,27 @@ docker run -d \
 
 echo "=========================================================="
 echo " Container launched successfully!"
+if [ "$HAS_GUI" = true ]; then
+    echo " Native GUI Window:    ACTIVE on desktop ('RPi Edge Vision & Distance')"
+    echo "                       (Press 'q' or ESC in the window to quit)"
+fi
 if [ "$NO_WEB" = true ]; then
     echo " Mode:                 Maximum Performance (--no-web)"
-    echo " Web Dashboard:        Disabled (Saves CPU cycles)"
+    echo " Web Dashboard:        Disabled"
+    if [ "$HAS_GUI" = false ]; then
+        echo " Note:                 Running in terminal mode (no visual display)."
+        echo "                       -> To view live desktop window: ./run.sh --no-web --gui"
+        echo "                       -> To view in web browser:     ./run.sh"
+    fi
     echo " Showing live telemetry output below (Press Ctrl+C to detach):"
     echo "=========================================================="
     docker logs -f "${CONTAINER_NAME}"
 else
-    echo " Web Stream Dashboard: http://localhost:8080 (or http://${IP_ADDR}:8080)"
+    echo " Web Dashboard:        http://localhost:8080 (or http://${IP_ADDR}:8080)"
+    echo "                       👉 Open in any browser to watch live annotated video!"
+    if [ "$HAS_GUI" = false ]; then
+        echo " Native GUI Window:    To also pop up desktop window, pass --gui: ./run.sh --gui"
+    fi
     echo " View live logs:       docker logs -f ${CONTAINER_NAME}"
     echo " Stop container:       docker stop ${CONTAINER_NAME}"
     echo "=========================================================="

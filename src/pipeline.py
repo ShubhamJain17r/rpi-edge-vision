@@ -271,13 +271,13 @@ class AsyncPipeline:
                         logger.warning(f"cv2.imshow failed: {e}. Switching to console output.")
                         use_gui = False
 
-                # 3. Live Console Telemetry (when in --no-web and no GUI)
-                if not use_gui and self.streamer is None:
-                    if now - last_console_time >= 0.75:
-                        det_strs = [f"{d.class_name}({int(d.confidence*100)}%, dist={d.distance_m}m)" for d in dets]
-                        det_summary = ", ".join(det_strs) if det_strs else "No objects detected"
-                        logger.info(f"[TELEMETRY] Video: {display_fps:.0f} FPS | AI: {inf_fps:.0f} FPS | {det_summary}")
-                        last_console_time = now
+                # 3. Live Console Telemetry
+                interval = 0.75 if (not use_gui and self.streamer is None) else 3.0
+                if now - last_console_time >= interval:
+                    det_strs = [f"{d.class_name}({int(d.confidence*100)}%, dist={d.distance_m}m)" for d in dets]
+                    det_summary = ", ".join(det_strs) if det_strs else "No objects detected"
+                    logger.info(f"[TELEMETRY] Video: {display_fps:.0f} FPS | AI: {inf_fps:.0f} FPS | {det_summary}")
+                    last_console_time = now
 
                 time.sleep(0.008)
 
