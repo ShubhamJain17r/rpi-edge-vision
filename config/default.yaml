@@ -53,7 +53,7 @@ distance:
     input_size: [256, 256]
 
 display:
-  gui_window: true             # ⚡ Show native, high-performance OpenCV window (cv2.imshow)
+  gui_window: false             # ⚡ Show native, high-performance OpenCV window (cv2.imshow)
   window_name: "RPi Edge Vision & Distance"
 
 web_streamer:

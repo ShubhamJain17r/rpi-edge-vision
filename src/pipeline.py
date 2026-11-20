@@ -2,8 +2,8 @@
 High-FPS Edge AI Vision & Distance Pipeline.
 Optimized for Raspberry Pi 4 & 5 with:
 - Asynchronous threaded inference (camera @ 30 FPS, detection decoupled)
-- Native OpenCV GUI Window (cv2.imshow) with graceful headless fallback
-- Clean console telemetry when running without GUI and without web server
+- Safe GUI detection (guards against Qt xcb crashes)
+- Real-time terminal console telemetry in --no-web mode
 - Instantaneous (<0.05ms) optical pinhole metric distance estimation
 """
 
@@ -13,6 +13,7 @@ import time
 import signal
 import logging
 import argparse
+import ctypes
 import threading
 from typing import Dict, Any, List, Optional
 import yaml
@@ -26,6 +27,18 @@ from src.web_streamer import WebStreamer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def is_qt_gui_supported() -> bool:
+    """Checks whether Qt X11 dependencies are satisfied before invoking OpenCV GUI."""
+    if not os.environ.get("DISPLAY"):
+        return False
+    try:
+        ctypes.CDLL("libSM.so.6")
+        ctypes.CDLL("libICE.so.6")
+        return True
+    except OSError:
+        return False
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -100,14 +113,7 @@ def annotate_frame(
 
 
 class AsyncPipeline:
-    """
-    Decoupled architecture:
-    - Camera runs at native 30 FPS.
-    - AI Detector runs asynchronously in background worker thread.
-    - Display / Streamer renders latest camera frame with latest detections.
-    """
-
-    def __init__(self, config: Dict[str, Any], show_gui: bool = True, enable_web: bool = True):
+    def __init__(self, config: Dict[str, Any], show_gui: bool = False, enable_web: bool = True):
         self.config = config
         self.show_gui = show_gui
         self.enable_web = enable_web
@@ -129,7 +135,7 @@ class AsyncPipeline:
             fallback_synthetic=cam_cfg.get("fallback_synthetic", True)
         )
 
-        # 2. Edge Detector (imgsz 320 for high-speed edge inference)
+        # 2. Edge Detector
         self.detector = EdgeDetector(
             model_path=det_cfg.get("model_path", "weights/yolov8n.pt"),
             conf_threshold=det_cfg.get("conf_threshold", 0.35),
@@ -171,7 +177,6 @@ class AsyncPipeline:
         return self
 
     def _inference_loop(self):
-        """Continuously pulls newest frame and computes detections + distance without blocking display."""
         frame_idx = 0
         last_inf_time = time.time()
         inf_count = 0
@@ -206,26 +211,29 @@ class AsyncPipeline:
             time.sleep(0.001)
 
     def run_display_loop(self):
-        """Main rendering loop: renders to OpenCV GUI window, Web Stream, or prints Console Telemetry."""
         window_name = self.config.get("display", {}).get("window_name", "RPi Edge Vision & Distance")
-        use_gui = self.show_gui and bool(os.environ.get("DISPLAY"))
+        use_gui = False
 
-        # Try initializing OpenCV GUI window safely
-        if use_gui:
-            try:
-                cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-                cv2.resizeWindow(window_name, 640, 480)
-                logger.info(f"✓ Native OpenCV GUI window active on display: '{window_name}'")
-            except Exception as e:
-                logger.warning(f"Could not open GUI window ({e}). Running in headless mode.")
-                use_gui = False
+        if self.show_gui:
+            if is_qt_gui_supported():
+                try:
+                    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                    cv2.resizeWindow(window_name, 640, 480)
+                    use_gui = True
+                    logger.info(f"✓ Native OpenCV GUI window active: '{window_name}'")
+                except Exception as e:
+                    logger.warning(f"Could not open GUI window ({e}). Running in terminal console mode.")
+            else:
+                logger.info("ℹ GUI window not available (Qt X11 libraries missing). Running in terminal console mode.")
 
         display_fps = 0.0
         frame_count = 0
         last_fps_time = time.time()
         last_console_time = time.time()
 
-        logger.info("Pipeline rendering active! Press Ctrl+C or 'q' in GUI window to stop.")
+        if not use_gui and self.streamer is None:
+            logger.info("Running in Maximum Performance Mode (--no-web).")
+            logger.info("Streaming live detections and metric distance telemetry below:")
 
         try:
             while self.running:
@@ -241,40 +249,36 @@ class AsyncPipeline:
                     frame_count = 0
                     last_fps_time = now
 
-                # Get latest detections thread-safely
                 with self.lock:
                     dets = list(self.latest_detections)
                     depth_preview = self.latest_depth_vis
                     inf_fps = self.inf_fps
 
-                # Annotate frame
                 annotated = annotate_frame(frame, dets, display_fps, inf_fps, depth_preview)
 
-                # 1. Push to Web Streamer (if enabled)
+                # 1. Web Streamer
                 if self.streamer is not None:
                     self.streamer.update_frame(annotated, display_fps, dets)
 
-                # 2. Render to local OpenCV GUI Window (if active)
+                # 2. OpenCV GUI Window
                 if use_gui:
                     try:
                         cv2.imshow(window_name, annotated)
                         key = cv2.waitKey(1) & 0xFF
-                        if key == ord('q') or key == 27:  # 'q' or ESC
-                            logger.info("Exit key pressed in OpenCV window.")
+                        if key == ord('q') or key == 27:
                             break
                     except Exception as e:
                         logger.warning(f"cv2.imshow failed: {e}. Switching to console output.")
                         use_gui = False
 
-                # 3. If running headless without web server (--no-web and no GUI), print console telemetry
+                # 3. Live Console Telemetry (when in --no-web and no GUI)
                 if not use_gui and self.streamer is None:
-                    if now - last_console_time >= 1.0:
-                        det_strs = [f"{d.class_name}({d.confidence*100:.0f}%, dist={d.distance_m}m)" for d in dets]
-                        det_summary = ", ".join(det_strs) if det_strs else "No objects"
-                        logger.info(f"[TELEMETRY] Video: {display_fps:.1f} FPS | AI: {inf_fps:.1f} FPS | {det_summary}")
+                    if now - last_console_time >= 0.75:
+                        det_strs = [f"{d.class_name}({int(d.confidence*100)}%, dist={d.distance_m}m)" for d in dets]
+                        det_summary = ", ".join(det_strs) if det_strs else "No objects detected"
+                        logger.info(f"[TELEMETRY] Video: {display_fps:.0f} FPS | AI: {inf_fps:.0f} FPS | {det_summary}")
                         last_console_time = now
 
-                # Sleep to match target ~30 FPS
                 time.sleep(0.008)
 
         except KeyboardInterrupt:
@@ -302,7 +306,7 @@ def main():
     parser.add_argument("--imgsz", type=int, default=None, help="Override inference size (e.g. 320 for max speed)")
     parser.add_argument("--mode", type=str, default=None, help="Distance mode: 'pinhole' (fastest), 'both', or 'midas'")
     parser.add_argument("--no-web", action="store_true", help="Disable web streamer to save CPU cycles")
-    parser.add_argument("--no-gui", action="store_true", help="Disable OpenCV GUI window")
+    parser.add_argument("--gui", action="store_true", help="Enable OpenCV GUI window (requires working Qt/X11)")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -317,7 +321,7 @@ def main():
 
     pipeline = AsyncPipeline(
         config=config,
-        show_gui=not args.no_gui,
+        show_gui=args.gui or config.get("display", {}).get("gui_window", False),
         enable_web=not args.no_web
     )
     pipeline.start()
