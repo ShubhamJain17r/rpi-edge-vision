@@ -12,19 +12,21 @@ services:
     ports:
       - "8080:8080"
     devices:
-      # Pass through hardware camera devices
       - "/dev/video0:/dev/video0"
-    # Privileged or video group access needed for V4L2 device nodes
     privileged: true
     group_add:
       - video
     volumes:
+      - ./src:/app/src:ro
       - ./config:/app/config:ro
       - ./data:/app/data
       - ./models:/app/models
+      # X11 Display pass-through for high-performance OpenCV GUI window
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
     environment:
       - PYTHONUNBUFFERED=1
       - OMP_NUM_THREADS=4
+      - DISPLAY=${DISPLAY:-:0}
     command: ["--config", "config/default.yaml"]
 
   # One-shot Transfer Learning Service for Custom Object Detection
@@ -36,7 +38,7 @@ services:
       - ./data:/app/data
       - ./models:/app/models
     entrypoint: ["python3", "-m", "src.train_detector"]
-    command: ["--data", "data/custom_dataset.yaml", "--epochs", "20", "--batch", "8"]
+    command: ["--data", "data/custom_dataset.yaml", "--epochs", "20", "--batch", "8", "--imgsz", "320"]
 
   # One-shot Transfer Learning Service for Custom Image Classification
   train-classifier:

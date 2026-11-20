@@ -94,12 +94,11 @@ class TestEdgeVisionPipeline(unittest.TestCase):
             distance_m=1.70
         )
         s2 = smoother.smooth(det2)
-        # Expected smoothed = 0.5 * 1.70 + 0.5 * 1.50 = 1.60
         self.assertAlmostEqual(s2, 1.60, delta=0.02)
         logger.info(f"✓ Temporal distance smoother verified: raw 1.70m -> smoothed {s2}m")
 
-    def test_05_decoupled_cadence_pipeline(self):
-        """Test unified DistanceEstimator with sub-sampled depth cadence."""
+    def test_05_distance_estimator_pipeline(self):
+        """Test unified DistanceEstimator with pinhole mode."""
         engine = DistanceEstimator(self.config)
         cam = SyntheticCamera(width=640, height=480)
         _, frame = cam.read()
@@ -116,19 +115,14 @@ class TestEdgeVisionPipeline(unittest.TestCase):
             )
         ]
 
-        # 1st call: compute depth
-        processed, depth_vis = engine.process(frame, detections, compute_depth=True)
+        processed, depth_vis = engine.process(frame, detections)
         self.assertEqual(len(processed), 1)
         self.assertIsNotNone(processed[0].distance_m)
-
-        # 2nd call: skip depth (reusing cached map)
-        processed2, depth_vis2 = engine.process(frame, detections, compute_depth=False)
-        self.assertEqual(len(processed2), 1)
-        self.assertIsNotNone(processed2[0].distance_m)
-        logger.info(f"✓ Decoupled cadence pipeline verified (distance={processed2[0].distance_m}m)")
+        self.assertGreater(processed[0].distance_m, 0.0)
+        logger.info(f"✓ Instantaneous pinhole distance verified: {processed[0].distance_m}m")
 
     def test_06_frame_annotation(self):
-        """Test frame annotation draws bounding boxes, labels, and latency status bar."""
+        """Test frame annotation draws bounding boxes, labels, and FPS indicators."""
         cam = SyntheticCamera(width=640, height=480)
         _, frame = cam.read()
 
@@ -144,9 +138,9 @@ class TestEdgeVisionPipeline(unittest.TestCase):
             relative_depth=0.82
         )
 
-        annotated = annotate_frame(frame, [det], fps=28.5, inference_ms=35.0)
+        annotated = annotate_frame(frame, [det], display_fps=29.8, inf_fps=18.4)
         self.assertEqual(annotated.shape, frame.shape)
-        logger.info("✓ Frame annotation verified with latency metrics.")
+        logger.info("✓ Frame annotation verified.")
 
     def test_07_web_streamer(self):
         """Test WebStreamer accepts frames and formats telemetry."""
